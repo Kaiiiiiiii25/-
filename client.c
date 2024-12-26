@@ -60,6 +60,7 @@ struct game_state gs;
 int sockfd;
 struct pollfd fds[2];
 int guidestatus=0; 
+int inavaildstatus=0;
 
 void clear_screen();
 void init_board();
@@ -142,6 +143,22 @@ void draw_draw() {
     printf("████   █   █   █     █    █      █\n");
 }
 
+void draw_gameover() {
+    clear_screen();
+    MOVE_CURSOR(0, 1);
+    printf(" ████     █        █     █     █████\n");
+    printf("█        █ █      █ █   █ █    █\n");
+    printf("█  ███  █████    █   █ █   █   █████\n");
+    printf("█   █   █   █    █   █ █   █   █\n");
+    printf(" ████  █     █  █     █     █  █████\n");
+    printf("\n");  
+    printf(" ███    █     █     █████      ████\n");
+    printf("█   █    █   █      █          █  █\n");
+    printf("█   █    █   █      █████      ████\n");
+    printf("█   █     █ █       █          █   █\n");
+    printf(" ███       █        █████      █   █\n");
+}
+
 
 void display_chat_history() {
     for (int i = first_line + 1; i < first_line + 12; i++) {
@@ -167,10 +184,22 @@ void display_chat_history() {
         MOVE_CURSOR(19, 0);
         if (gs.my_turn && !gs.game_ended) {
             printf("\033[KYour turn! Enter 1-7 or ':' for chat: ");
+            if(inavaildstatus){
+                //
+                MOVE_CURSOR(19, 0);
+                printf("\033[KInvalid move! Enter 1-7 or ':' for chat: ");
+            }
         } else if (!gs.game_ended) {
             printf("\033[KOpponent's turn...");
         }
     }
+    else if(gs.is_audience && !gs.game_ended){
+        MOVE_CURSOR(19, 0);
+        printf("Press q to quit or type your message after ':'.\n");
+        MOVE_CURSOR(13 + first_line,0);
+    }
+    MOVE_CURSOR(13 + first_line,0);
+    
 }
 
 
@@ -197,7 +226,7 @@ void init_game_state() {
     init_chat_queue(&gs.chat);
 }
 
-void draw_board() {
+void draw_board(){
     clear_screen();
     if (gs.is_audience) {
         MOVE_CURSOR(4,1);
@@ -210,6 +239,7 @@ void draw_board() {
     if (gs.audience_count > 0) {
         MOVE_CURSOR(1, 20);
         printf("Audiences: %d", gs.audience_count);
+        MOVE_CURSOR(13 + first_line,0);
     }
     char token = (gs.player_number == 1) ? 'O' : 'X';
     char arrow[] = "->";
@@ -266,13 +296,22 @@ void draw_board() {
         if (gs.my_turn && !gs.game_ended) {
             MOVE_CURSOR(19, 0);
             printf("Your turn! Enter 1-7 or ':' for chat: \n");
+            if(inavaildstatus){
+                //inavaildstatus=0;
+                MOVE_CURSOR(19, 0);
+                printf("\033[KInvalid move! Enter 1-7 or ':' for chat: \n");
+            }
         } else if (!gs.game_ended) {
             MOVE_CURSOR(19, 0);
             printf("Opponent's turn...\n");
         }
     }
+    else if(gs.is_audience && !gs.game_ended){
+        MOVE_CURSOR(19, 0);
+        printf("Press q to quit or type your message after ':'.\n");
+    }
+    MOVE_CURSOR(13 + first_line,0);
 }
-
 
 void send_chat(const char* message) {
     if (strlen(message) >= MAX_MSG_LEN - 64) {
@@ -381,7 +420,11 @@ void handle_server_message(char *buf) {
                     printf("Room created successfully! Room ID: %d\n", room_id);
                     printf("Waiting for opponent...\n");
                     gs.state = STATE_WAITING;
-                } else {
+                }
+                else if(message[1] == ' ' && strlen(message) == 2){
+                    ;
+                }
+                else {
                     printf("%s\n", message + 1);
                 }
                 break;
@@ -410,9 +453,22 @@ void handle_server_message(char *buf) {
                     MOVE_CURSOR(19, 0);
                     if (gs.my_turn && !gs.game_ended && !gs.is_audience) {
                         printf("Your turn! Enter 1-7 or ':' for chat: \n");
+                        if(inavaildstatus){
+                            //inavaildstatus=0;
+                            MOVE_CURSOR(19, 0);
+                            printf("\033[KInvalid move! Enter 1-7 or ':' for chat: ");
+                        }
+                        MOVE_CURSOR(13 + first_line,0);
                     } else if (!gs.game_ended && !gs.is_audience) {
                         printf("Opponent's turn...\n");
+                        MOVE_CURSOR(13 + first_line,0);
                     }
+                    else if(gs.is_audience && !gs.game_ended){
+                        MOVE_CURSOR(19, 0);
+                        printf("Press q to quit or type your message after ':'.\n");
+                        MOVE_CURSOR(13 + first_line,0);
+                    }
+                    
                     fflush(stdout);
                 }
                 break;
@@ -432,13 +488,14 @@ void handle_server_message(char *buf) {
                 if (gs.state == STATE_IN_GAME) {
                     clear_screen();
                     draw_board();
-                    MOVE_CURSOR(19,0);
+                    MOVE_CURSOR(13 + first_line,0);
                     fflush(stdout);
                 }
                 break;
             }
 
             case 'e': {
+                inavaildstatus=0;
                 if (message[1] == 'T') {
                     long long timeout_player_id;
                     sscanf(message + 2, "%lld", &timeout_player_id);
@@ -447,21 +504,25 @@ void handle_server_message(char *buf) {
                     MOVE_CURSOR(19, 0);
                     
                     if (gs.is_audience) {
+                        draw_gameover();
                         if (timeout_player_id == gs.player_1_id) {
-                            printf("\nGame Over - Player 1 (%s) lost due to timeout!\n", gs.player_1_name);
+                            printf("\nPlayer 1 (%s) lost due to timeout!\n", gs.player_1_name);
+                            printf("Press Enter to return to menu...\n");
                         } else {
-                            printf("\nGame Over - Player 2 (%s) lost due to timeout!\n", gs.player_2_name);
+                            printf("\nPlayer 2 (%s) lost due to timeout!\n", gs.player_2_name);
+                            printf("Press Enter to return to menu...\n");
                         }
                     } else {
                         if (timeout_player_id == gs.player_id) {
                             draw_failure();
                             printf("\nGame Over - You lost due to timeout!\n");
+                            printf("Press Enter to return to menu...\n");
                         } else {
                             draw_victory();
                             printf("\nGame Over - You won! Opponent timed out!\n");
+                            printf("Press Enter to return to menu...\n");
                         }
                     }
-                    printf("\nPress Enter to return to menu...");
                     gs.game_ended = 1;
                     break;
                 }
@@ -483,38 +544,42 @@ void handle_server_message(char *buf) {
                     sscanf(message + 2, "%lld", &quit_id);
                     MOVE_CURSOR(19, 0);
                     if (gs.is_audience) {
-                        printf("Game ended - A player disconnected.\n");
+                        printf("Game ended - A player quit.\n");
+                        printf("Press Enter to return to menu...\n");
                     }
                     else if(quit_id == gs.player_id){
-                        printf("You left the game.\n");
+                        printf("You quit the game.\n");
+                        printf("Press Enter to return to menu...\n");
                     }
                     else{
-                        printf("Your opponent left.\n");
+                        printf("Your opponent quit.\n");
+                        printf("Press Enter to return to menu...");
                     }
-                    printf("Press Enter to return to menu...");
+                    
                     gs.game_ended = 1;
                     break;
                 }
 
                 int result = message[1] - '0';
                 MOVE_CURSOR(19, 0);
-                if (result == -1) {
-                    printf("Game ended in a draw!\n");
+                if (result == 9) {
+                    draw_draw();
                 } else if (gs.is_audience) {
+                    draw_gameover();
                     if (result == 1) {
-                        printf("Game Over - Player 1 (%s) wins!\n", gs.player_1_name);
+                        printf("Player 1 (%s) wins!\n", gs.player_1_name);
+                        printf("Press Enter to return to menu...\n");
                     } else {
-                        printf("Game Over - Player 2 (%s) wins!\n", gs.player_2_name);
+                        printf("Player 2 (%s) wins!\n", gs.player_2_name);
+                        printf("Press Enter to return to menu...\n");
                     }
                 } else {
                     if (result == gs.player_number) {
                         draw_victory();
                     } else {
                         draw_failure();
-                        printf("Game Over - You lost!\n");
                     }
                 }
-                printf("Press Enter to return to menu...");
                 fflush(stdout);
                 gs.game_ended = 1;
                 break;
@@ -535,19 +600,29 @@ void handle_server_message(char *buf) {
                     sscanf(message + 2, "%lld", &gs.opponent_id);
                     gs.state = STATE_IN_GAME;
                     gs.is_audience = 0;
+                    gs.game_ended = 0;  // Reset game_ended flag when starting new game
                     init_chat_queue(&gs.chat);  
                     clear_screen();
                     draw_board();
                     display_chat_history();
+                    inavaildstatus=0;
                     MOVE_CURSOR(19, 0);
                     if (gs.my_turn && !gs.game_ended) {
                         printf("\033[KYour turn! Enter 1-7 or ':' for chat: ");
+                        if(inavaildstatus){
+                            inavaildstatus = 0;
+                            MOVE_CURSOR(19, 0);
+                            printf("\033[KInvalid move! Enter 1-7 or ':' for chat: ");
+                        }
+                        MOVE_CURSOR(13 + first_line,0);
                     } else if (!gs.game_ended) {
                         printf("\033[KOpponent's turn...");
+                        MOVE_CURSOR(13 + first_line,0);
                     }
                     fflush(stdout);
                     break;
                 }
+
 
                 else if(message[1] == '6'){
                     if(message[2] == '1'){
@@ -575,23 +650,19 @@ void handle_server_message(char *buf) {
                 else if(message[1] == '9'){ 
                     gs.state = STATE_IN_GAME;
                     gs.is_audience = 1;
+                    gs.game_ended = 0;  
                     init_chat_queue(&gs.chat);
                     clear_screen();
                     draw_board();
+                    draw_chat_box();
+                    display_chat_history();
 
-                    MOVE_CURSOR(19,0);
+                    if (gs.audience_count > 0 || gs.audience_count == 0) {
+                        MOVE_CURSOR(1, 20);
+                        printf("Audiences: %d", gs.audience_count);
+                    }
                     fflush(stdout);
-                    //draw_chat_box();
-                    //display_chat_history();
-                    // Add "Enter ':' to chat" message in chat area
-                    //MOVE_CURSOR(13 + first_line, 3);
-                    //printf("Enter ':' to chat");
-                    // Draw additional UI elements if needed
-                    //if (gs.audience_count > 0) {
-                    //    MOVE_CURSOR(1, 20);
-                    //    printf("Audiences: %d", gs.audience_count);
-                    //}
-                    //fflush(stdout);
+                    MOVE_CURSOR(13 + first_line,0);
                     break;
                 }
 
@@ -631,6 +702,7 @@ void handle_user_input() {
             int choice = atoi(buf);
             switch(choice) {
                 case 1:  // Random Match
+                    gs.game_ended = 0;  // Reset game_ended flag when starting new match
                     snprintf(buf, sizeof(buf), "m1%lld\n", gs.player_id);
                     Writen(sockfd, buf, strlen(buf));
                     printf("Finding a match...\n");
@@ -638,11 +710,13 @@ void handle_user_input() {
                     break;
                     
                 case 2:  // Create Private Room
+                    gs.game_ended = 0;  // Reset game_ended flag when creating room
                     snprintf(buf, sizeof(buf), "m2%lld\n", gs.player_id);
                     Writen(sockfd, buf, strlen(buf));
                     break;
                     
                 case 3: {  // Join Private Room
+                    gs.game_ended = 0;  // Reset game_ended flag when joining room
                     printf("Enter room ID: ");
                     fflush(stdout);
                     if (fgets(buf, sizeof(buf), stdin)) {
@@ -652,37 +726,44 @@ void handle_user_input() {
                     }
                     break;
                 }
-                
-                case 4: {  // Watch a Game
-                    printf("Enter room ID to watch: ");
-                    fflush(stdout);
-                    if (fgets(buf, sizeof(buf), stdin)) {
-                        char msg[32];
-                        snprintf(msg, sizeof(msg), "m4%lld;%s", gs.player_id, buf);
-                        Writen(sockfd, msg, strlen(msg));
+                        
+                        case 4: {  // Watch a Game
+                            gs.game_ended = 0;  
+                            printf("Enter room ID to watch: ");
+                            fflush(stdout);
+                            if (fgets(buf, sizeof(buf), stdin)) {
+                                char msg[32];
+                                snprintf(msg, sizeof(msg), "m4%lld;%s", gs.player_id, buf);
+                                Writen(sockfd, msg, strlen(msg));
+                            }
+                            break;
+                        }
+                        
+                        case 5:  // Exit
+                            exit(0);
+                            break;
+                            
+                        default:
+                            printf("Invalid choice. Please enter 1-5: ");
+                            fflush(stdout);
                     }
                     break;
                 }
-                
-                case 5:  // Exit
-                    exit(0);
-                    break;
-                    
-                default:
-                    printf("Invalid choice. Please enter 1-5: ");
-                    fflush(stdout);
-            }
-            break;
-        }
 
-        case STATE_IN_GAME: {
-            if (gs.game_ended) {
-                gs.state = STATE_MENU;
-                gs.game_ended = 0;
-                init_board();
-                display_menu();
-                break;
-            }
+                case STATE_IN_GAME: {
+                    if (gs.game_ended) {
+                        if (gs.is_audience) {
+                            // For audience members, send explicit leave message
+                            char quit_msg[32];
+                            snprintf(quit_msg, sizeof(quit_msg), "l%lld\n", gs.player_id);
+                            Writen(sockfd, quit_msg, strlen(quit_msg));
+                        }
+                        gs.state = STATE_MENU;
+                        gs.game_ended = 0;
+                        init_board();
+                        display_menu();
+                        break;
+                    }
 
             if (strlen(buf) == 0) {
                 return;
@@ -742,9 +823,12 @@ void handle_user_input() {
                 int column = atoi(buf);
                 if (column >= 1 && column <= 7 && is_valid_move(column)) {
                     send_move(column);
+                    inavaildstatus=0;
                 } else if (column != 0) {  // Only show error if input was a number but invalid
                     MOVE_CURSOR(19, 0);
                     printf("Invalid move! Enter 1-7 or ':' for chat: ");
+                    inavaildstatus=1;
+                    MOVE_CURSOR(13 + first_line,0);
                     fflush(stdout);
                 }
             }
@@ -753,8 +837,20 @@ void handle_user_input() {
             MOVE_CURSOR(19, 0);
             if (gs.my_turn && !gs.game_ended && !gs.is_audience) {
                 printf("Your turn! Enter 1-7 or ':' for chat: ");
+                if(inavaildstatus){
+                    //
+                    MOVE_CURSOR(19, 0);
+                    printf("\033[KInvalid move! Enter 1-7 or ':' for chat: ");
+                }
+                MOVE_CURSOR(13 + first_line,0);
             } else if (!gs.game_ended && !gs.is_audience) {
                 printf("Opponent's turn...");
+                MOVE_CURSOR(13 + first_line,0);
+            }
+            else if(gs.is_audience && !gs.game_ended){
+                MOVE_CURSOR(19, 0);
+                printf("Press q to quit or type your message after ':'.\n");
+                MOVE_CURSOR(13 + first_line,0);
             }
             fflush(stdout);
             break;
@@ -793,9 +889,6 @@ int main(int argc, char **argv) {
     fflush(stdout);
 
     while (1) {
-        if(gs.state==STATE_IN_GAME){
-            MOVE_CURSOR(22,0);
-        }
         int nready = Poll(fds, 2, INFTIM);
         if (fds[0].revents & POLLIN) {
             handle_user_input();
@@ -808,6 +901,9 @@ int main(int argc, char **argv) {
             }
             recvbuf[n] = '\0';
             handle_server_message(recvbuf);
+        }
+        if(gs.state==STATE_IN_GAME){
+            MOVE_CURSOR(13 + first_line,0);
         }
     }
 
