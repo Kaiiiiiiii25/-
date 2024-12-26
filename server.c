@@ -210,6 +210,10 @@ void send_game_state_to_players(struct Room* room) {
 
     char msg[128];
 
+    snprintf(msg, sizeof(msg), "a%d\n", room->audience_count);
+    Writen(player1->fd, msg, strlen(msg));
+    Writen(player2->fd, msg, strlen(msg));
+
     snprintf(msg, sizeof(msg), "r%d\n", room->id);
     Writen(player1->fd, msg, strlen(msg));
     Writen(player2->fd, msg, strlen(msg));
@@ -436,6 +440,8 @@ void cleanup_room(struct Room* room) {
     room->is_active = 0;
 }
 
+// In server.c, modify the cleanup_disconnected_client function:
+
 void cleanup_disconnected_client(int fd) {
     struct Player* player = find_player_by_fd(fd);
     if (!player) return;
@@ -473,6 +479,12 @@ void cleanup_disconnected_client(int fd) {
                 }
             } else {
                 // They must be an audience member
+                // Send notification if game is still active
+                if (room->is_active) {
+                    char chat_msg[128];
+                    snprintf(chat_msg, sizeof(chat_msg), "cSystem;Audience (%s) Disconnected\n", player->name);
+                    notify_room(room->id, chat_msg);
+                }
                 remove_audience_member(room, player->id);
             }
         }
@@ -613,7 +625,7 @@ void handle_move(struct Room* room, long long player_id, int column) {
             if (!is_full) break;
         }
         if (is_full) {
-            notify_room(room->id, "e-1\n");
+            notify_room(room->id, "e9\n");
             room->is_active = 0;
         }
     }
@@ -651,6 +663,10 @@ void join_as_audience(long long player_id, int room_id) {
     char msg[32];
     snprintf(msg, sizeof(msg), "a%d\n", room->audience_count);
     notify_room(room->id, msg);
+
+    char chat_msg[128];
+    snprintf(chat_msg, sizeof(chat_msg), "cSystem;New Audience Join (%s)\n", player->name);
+    notify_room(room->id, chat_msg);
 }
 
 void handle_client_message(int fd, char *buf, ssize_t n) {
@@ -770,7 +786,7 @@ void handle_client_message(int fd, char *buf, ssize_t n) {
                             if (room->player_1 == player_id) room->player_1 = -1;
                             if (room->player_2 == player_id) room->player_2 = -1;
                             
-                            if (room->player_1 == -1 && room->player_2 == -1) {
+                            if (room->player_1 == -1 || room->player_2 == -1) {
                                 cleanup_room(room);
                                 room_status[room->id - MIN_ROOM_ID] = 0;
                             }
@@ -794,13 +810,21 @@ void handle_client_message(int fd, char *buf, ssize_t n) {
                         remove_audience_member(room, player_id);
                         player->room_id = -1;
                         
-                        // Send back a message to return to menu
-                        char msg[] = "wReturning to menu...\n";
+                        // Just confirm menu return to the leaving player
+                        char msg[] = "w ";
                         Writen(player->fd, msg, strlen(msg));
+
+                        // Send leave notification if game is still active
+                        if (room->is_active) {
+                            char chat_msg[128];
+                            snprintf(chat_msg, sizeof(chat_msg), "cSystem;Audience (%s) Left\n", player->name);
+                            notify_room(room->id, chat_msg);
+                        }
                     }
                 }
                 break;
             }
+
 
             default:
                 printf("Unknown message from client: %s\n", message);
